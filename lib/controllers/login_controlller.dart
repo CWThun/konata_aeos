@@ -32,7 +32,7 @@ class LoginController extends GetxController {
     var user = await loginParent(RegistUserInfo(mail: email, pass_txt: password), errorTest: false);
 
     if (user.errorCode == successCode) {
-      await saveLoginUserToMemory(RegistUserInfo(aivo_id: user.aivo_id, parent_id: user.parent_id, pass_txt: password));
+      await saveLoginUserToMemory(RegistUserInfo(aivo_id: user.aivo_id, parent_id: user.parent_id, pass_txt: password, mail: email));
     }
 
     loginUser.value = user;

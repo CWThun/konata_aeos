@@ -62,6 +62,7 @@ class RegistUserInfo {
   Map<String, dynamic> toJson() => {
         'aivo_id': aivo_id,
         'parent_id': parent_id,
+        'mail': mail,
       };
 }
 
