@@ -1,0 +1,621 @@
+// ignore_for_file: prefer_const_literals_to_create_immutables, prefer_const_constructors, unused_element, unused_field, prefer_final_fields
+
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:get/get.dart';
+import 'package:intl/intl.dart';
+import 'package:konata/models/audio_player.dart';
+import 'package:konata/models/chats.dart';
+import 'package:konata/models/speech_wrapper.dart';
+import 'package:konata/utils/api_utils.dart';
+import 'package:konata/utils/mem_utils.dart';
+import 'package:konata/utils/methods.dart';
+import 'package:konata/utils/variable.dart';
+import 'package:panara_dialogs/panara_dialogs.dart';
+import 'package:progress_indicators/progress_indicators.dart';
+
+class ChatScreen extends StatefulWidget {
+  const ChatScreen({super.key});
+
+  @override
+  State<ChatScreen> createState() => _ChatScreenState();
+}
+
+class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
+  late bool isChatting = false; //会話中
+  late bool isSending = false; //メッセージ送信中
+
+  final List<ChatMessage> messages = [];
+
+  String centerMessage = startMessage;
+  String lastText = '';
+
+  final ScrollController _controller = ScrollController();
+  bool alreadyStarted = false;
+
+  final SpeechWrapper speech = SpeechWrapper();
+  final String endWord = '(^^♪';
+
+  final AudioHelper audioHelper = AudioHelper();
+  String wavPath = 'assets/sounds/ding.wav';
+  String neWavPath = 'assets/sounds/nenene.mp3';
+
+  Timer? noQuestionTimer;
+  late bool alreadyPing = false; //警告音鳴らすか
+  bool isTimerCounterEnable = false; //タイマーカウンターを有効にするか
+  int timerCounter = 0; //タイマーカウンター:0でスタート
+
+  final textStyle = TextStyle(
+    fontSize: 18,
+    decoration: TextDecoration.none,
+    color: Color.fromARGB(255, 114, 191, 197),
+    fontWeight: FontWeight.bold,
+    shadows: <Shadow>[
+      Shadow(
+        color: Colors.black,
+        blurRadius: 2.0,
+        offset: Offset(2.0, 2.0),
+      ),
+    ],
+  );
+
+  final bgColor2 = Color.fromRGBO(0, 204, 202, 1);
+
+  //final FlutterTts tts = FlutterTts();
+
+  ///患者さんのまとめた質問を送信
+  ///「送信」ボタンを押すとき
+  Future<bool> sendQuestion() async {
+    setState(() {
+      isSending = true;
+    });
+
+    //AIの仮メッセージを表示（回答中...のイメージ）
+    final question = messages.last.text;
+    ChatMessage tempMsg = ChatMessage(text: '', type: MessageType.right, isLoading: true);
+    setState(() {
+      messages.last = messages.last.copyWith(isLoading: false);
+      messages.insert(messages.length, tempMsg);
+    });
+
+    scrollDown();
+
+    //質問送信
+    final qna = await questionAnser(QnARequestModel(aivo_id: loginUser!.aivo_id!, timestamp: DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now()), speech_txt: question));
+
+    setState(() {
+      isSending = false;
+    });
+
+    //エラー発生の場合
+    if (qna.isError) {
+      showErrorSnackbar(qna.message);
+      setState(() {
+        messages.removeLast();
+      });
+      stopChat();
+
+      return true;
+    }
+
+    setState(() {
+      messages.last = messages.last.copyWith(text: qna.answer_txt, isLoading: false, date: getCurretDate());
+    });
+
+    //play wav
+    await unmuteRingtone();
+    audioHelper.open(wavPath);
+    audioHelper.playWav();
+
+    scrollDown();
+
+    if (messages.isEmpty) return true;
+
+    setState(() {
+      ChatMessage last = messages.last;
+      messages.last = last.copyWith(isLoading: false);
+    });
+
+    //質問監視、10秒間でなければ⇒鳴らす⇒チャオ！
+    if (qna.answer_txt.isNotEmpty && !qna.answer_txt.trim().endsWith(endWord)) {
+      startNoQuestionTimer();
+    }
+
+    return true;
+  }
+
+  void scrollDown() {
+    if (!alreadyStarted) return;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _controller.animateTo(
+        _controller.position.maxScrollExtent,
+        duration: const Duration(seconds: 1),
+        curve: Curves.easeInOut,
+      );
+    });
+    //}
+  }
+
+  //認証結果の確立が低い⇒再認証
+  reListen() async {
+    await startListening();
+  }
+
+  ///患者の音声の聞くを開始
+  startListening() async {
+    await muteRingtone();
+    await Future.delayed(Duration(microseconds: 200));
+
+    ///認証結果
+    speech.startListening(afterRegconized);
+  }
+
+  ///認証結果の処理
+  ///新バージョン：送信ボタンクリックするまで、認証を繰り返し
+  afterRegconized(String words, double confidence) async {
+    ///認証停止
+    speech.stopListening();
+
+    if (words != '') {
+      addQuestion(words);
+    }
+    reListen(); //繰り返し音声聞き取り
+  }
+
+  ///会話終了
+  stopChat() async {
+    setState(() {
+      isChatting = false;
+      lastText = '';
+    });
+    speech.stopListening();
+
+    await unmuteRingtone();
+
+    ///最後はまだ音声かけない場合、
+    ///ラストメッセージ削除
+    if (messages.last.isLoading) {
+      setState(() {
+        messages.removeLast();
+      });
+    }
+
+    ///会話内容を保存
+    await saveChatMessages(messages);
+  }
+
+  bool get noNeedAddChau => messages.isEmpty || messages.length == 1 || messages.last.text.trim().startsWith('チャオ！');
+
+  ///チャオ！メッセージ表示
+  showChauoMessage(int index, {bool scroll = true}) {
+    setState(() {
+      if (messages.last.isLoading) {
+        messages.last = messages.last.copyWith(isLoading: false);
+      }
+      messages.insert(
+          index,
+          ChatMessage(
+            date: getCurretDate(),
+            text: 'チャオ！',
+            type: MessageType.right,
+          ));
+    });
+    if (scroll) {
+      scrollDown();
+    }
+  }
+
+  ///AIにチャオ！メッセージを送信
+  sendChauoMessage() async {
+    if (messages.isEmpty || messages.length == 1) return;
+    final qna = await questionAnser(QnARequestModel(aivo_id: loginUser!.aivo_id!, timestamp: DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now()), speech_txt: 'チャオ！'));
+    //エラー発生の場合
+    if (qna.isError) {
+      showErrorSnackbar(qna.message);
+    }
+    print('CHAUO!${qna.message}');
+  }
+
+  ///AI回答終了チェック
+  isAINotFinish() {
+    return (messages.last.type == MessageType.right && !messages.last.text.trim().endsWith(endWord));
+  }
+
+  ///質問タイマーをスタート
+  ///10秒間隔で質問チェック
+  startNoQuestionTimer() {
+    setState(() {
+      alreadyPing = false;
+    });
+    noQuestionTimer = Timer.periodic(Duration(seconds: 10), (_) async {
+      if (isChatting) {
+        stopNoQuestionTimer();
+      }
+
+      //10秒経過しても質問がない場合⇒音鳴らす
+      if (isAINotFinish()) {
+        ///音声を鳴らしてない⇒鳴らす
+        if (!alreadyPing) {
+          setState(() {
+            alreadyPing = true;
+          });
+          //print('BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB');
+          //await tts.speak('いかがでしょうか？');
+          audioHelper.open(neWavPath);
+          audioHelper.playWav();
+        }
+
+        ///音声を鳴らしている⇒チャオ！を表示
+        else {
+          //「チャオ！」表示
+          //print('BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBSEND');
+          stopNoQuestionTimer();
+          if (!noNeedAddChau) {
+            showChauoMessage(messages.length);
+            await sendChauoMessage();
+          }
+        }
+      }
+    });
+  }
+
+  ///回答なしのタイマーをストップ
+  stopNoQuestionTimer() {
+    if (noQuestionTimer != null) {
+      noQuestionTimer!.cancel();
+    }
+  }
+
+  ///会話の開始メッセージ
+  ///患者の音声を待つ形のメッセージ
+  addLeftWaitMessage() {
+    setState(() {
+      if (messages.last.isLoading) {
+        messages.last = messages.last.copyWith(isLoading: false);
+      }
+
+      messages.insert(
+        messages.length,
+        ChatMessage(text: '', type: MessageType.left, isLoading: true),
+      );
+    });
+    scrollDown();
+  }
+
+  ///左メッセージ更新（患者の音声）
+  updateLastLeftMessage() {
+    ChatMessage last = messages.last;
+    setState(() {
+      messages.last = last.copyWith(text: lastText, isLoading: true, date: getCurretDate(), time: getCurrentTime());
+    });
+    scrollDown();
+  }
+
+  ///聞き取り繰り返し、取れた分を追加
+  addQuestion(words) {
+    if (words != null && words != '') {
+      setState(() {
+        lastText += '${lastText != '' ? '、' : ''}$words';
+      });
+      updateLastLeftMessage();
+    }
+  }
+
+  ///患者さんのメッセージの時間
+  String getMessageDate(String messageDate, int index) {
+    String date = '';
+    if (messageDate == '') return '';
+    if (index == 0 || messages[index - 1].date != messageDate) {
+      date = messageDate;
+      if (date == getCurretDate()) return '今日';
+      final vals = date.split('年');
+      if (vals[0] == DateTime.now().year.toString()) {
+        date = vals[1];
+      }
+    }
+    return date;
+  }
+
+  ///アイコンクリックイベントの処理
+  tabProcess() async {
+    if (isSending) return; //メッセージ送信中->処理しない
+
+    ///会話中<br>
+    ///メッセージない場合⇒強制終了<br>
+    ///メッセージある場合⇒送信
+    if (isChatting) {
+      ///メッセージあり⇒送信
+      if (lastText != '') {
+        await sendQuestion();
+      }
+      await stopChat();
+    } else {
+      startChat();
+    }
+  }
+
+  ///チャット開始
+  startChat() async {
+    setState(() {
+      isChatting = true;
+    });
+
+    ///患者さんの仮メッセージを表示（質問中...のイメージ）
+    addLeftWaitMessage();
+
+    ///認証結果
+    await startListening();
+
+    setState(() {
+      alreadyStarted = true;
+    });
+  }
+
+  // 初期化処理
+  /*
+  initializeTts() async {
+    await tts.setLanguage('ja-JP');
+    await tts.setSpeechRate(0.3); //0.0~1.0, 小さいほどゆっくり
+    await tts.setPitch(1.3); //0.5~2.0, 1.0がデフォルト
+    await tts.awaitSpeakCompletion(false); // 発話の完了まで待機。
+    await tts.awaitSynthCompletion(true); // ファイルの合成まで待機。
+  }
+  */
+
+  @override
+  void initState() {
+    super.initState();
+    //initializeTts();
+    speech.initSpeech(() async => await startListening());
+
+    ///メモリからメッセージを読み込む
+    loadChatMessages().then((value) {
+      if (value.isEmpty) return;
+      value = value.where((element) => element.text.isNotEmpty).toList();
+      setState(() {
+        messages.addAll(value);
+        alreadyStarted = true;
+      });
+      Future.delayed(Duration(seconds: 1), () {
+        scrollDown();
+        _controller.jumpTo(_controller.position.maxScrollExtent);
+      });
+    });
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    speech.dispose();
+    stopNoQuestionTimer();
+    audioHelper.dispose();
+    saveChatMessages(messages);
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  Future<bool> didPopRoute() {
+    saveChatMessages(messages);
+    return super.didPopRoute();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      onPopInvoked: (didPop) async {
+        return;
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          elevation: 0.0,
+          scrolledUnderElevation: 0.0,
+          backgroundColor: bgColor, //Colors.brown,
+          leading: Padding(
+              padding: const EdgeInsets.only(left: 10.0),
+              child: InkWell(
+                onTap: () {
+                  //showSnackbar('実装中');
+                  showErrorDialog(context, '実装中', () {}, panaraDialogType: PanaraDialogType.normal);
+                },
+                child: Image.asset('assets/images/handshake_new.png', height: 50),
+              )),
+          centerTitle: true,
+          title: Padding(
+            padding: const EdgeInsets.only(left: 10.0),
+            child: InkWell(
+              onTap: () {
+                if (isChatting) return;
+                stopNoQuestionTimer();
+                Get.toNamed('/history');
+              },
+              child: Image.asset('assets/images/history.png', height: 50),
+            ),
+          ),
+          actions: [
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: () {
+                  stopNoQuestionTimer();
+                  Get.toNamed('/barcode');
+                },
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 10),
+                  child: Icon(
+                    Icons.qr_code_2,
+                    color: Colors.black, //Color.fromARGB(255, 114, 191, 197),
+                    size: 40,
+                  ),
+                ),
+              ),
+            )
+          ],
+        ),
+        body: SafeArea(
+          child: Container(
+            color: bgColor, //Colors.white,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: alreadyStarted
+                      ? ListView.builder(
+                          cacheExtent: 99999,
+                          controller: _controller,
+                          itemCount: messages.length,
+                          itemBuilder: (context, index) {
+                            final message = messages[index];
+                            String date = getMessageDate(message.date, index);
+
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                              child: Column(
+                                children: [
+                                  if (date != '')
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                      margin: const EdgeInsets.only(bottom: 10),
+                                      decoration: BoxDecoration(
+                                        color: Color.fromARGB(255, 141, 156, 182),
+                                        borderRadius: BorderRadius.circular(15),
+                                      ),
+                                      child: Text(
+                                        date,
+                                        style: TextStyle(color: Colors.white, fontSize: 12),
+                                      ),
+                                    ),
+                                  Row(
+                                    mainAxisAlignment: message.type == MessageType.left ? MainAxisAlignment.end : MainAxisAlignment.end,
+                                    //crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      if (message.type == MessageType.right)
+                                        const Padding(
+                                          padding: EdgeInsets.only(left: 10),
+                                          child: CircleAvatar(
+                                            radius: 22,
+                                            backgroundColor: Colors.transparent,
+                                            backgroundImage: AssetImage('assets/images/kidou.png'),
+                                          ),
+                                        ),
+                                      const SizedBox(width: 10),
+
+                                      ///右メッセージ（音声認証）の時間
+                                      if (message.type == MessageType.left)
+                                        Container(
+                                          width: 40,
+                                          padding: const EdgeInsets.only(top: 20),
+                                          child: Text(
+                                            message.time,
+                                            style: const TextStyle(fontSize: 9),
+                                            textAlign: TextAlign.right,
+                                          ),
+                                        ),
+
+                                      ///メインメッセージ
+                                      Expanded(
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            color: message.type == MessageType.right ? Colors.white : Color.fromARGB(255, 0, 204, 202),
+                                            borderRadius: BorderRadius.circular(15),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.grey.shade300,
+                                                blurRadius: 3.0,
+                                                offset: const Offset(0, 2.0),
+                                              ),
+                                            ],
+                                          ),
+                                          padding: const EdgeInsets.all(10),
+                                          margin: message.type == MessageType.left ? EdgeInsets.only(left: 5) : EdgeInsets.only(right: 20),
+                                          child:
+                                              message.isLoading && isChatting ? messageAndJumpText(message.text) : Text(message.text, style: TextStyle(fontSize: 16, decoration: TextDecoration.none)),
+                                        ),
+                                      ),
+
+                                      ///右アイコン
+
+                                      message.type == MessageType.left ? const SizedBox(width: 20, height: 0) : const SizedBox(width: 0, height: 0),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        )
+                      : Center(
+                          child: Text(
+                            centerMessage,
+                            style: textStyle,
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(left: 10.0),
+                      child: InkWell(
+                        onTap: () {
+                          showErrorDialog(context, '実装中', () {}, panaraDialogType: PanaraDialogType.normal);
+                        },
+                        child: Image.asset('assets/images/camera.png', height: 60),
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () async {
+                        await tabProcess();
+                      },
+                      child: Container(
+                        margin: EdgeInsets.only(bottom: 5, top: 5),
+                        width: 70,
+                        height: 70,
+                        decoration: shadowBorder,
+                        child: Icon(
+                          getIconData(),
+                          size: 60,
+                          color: bgColor2, //Color.fromARGB(255, 114, 191, 197),
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(right: 10.0),
+                      child: InkWell(
+                        onTap: () {
+                          showErrorDialog(context, '実装中', () {}, panaraDialogType: PanaraDialogType.normal);
+                        },
+                        child: Image.asset('assets/images/cloud.png', height: 60),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  IconData getIconData() {
+    return isChatting ? Icons.pause : Icons.mic_none;
+  }
+
+  Widget messageAndJumpText(String text) {
+    if (text == '') {
+      return JumpingText('・・・', style: const TextStyle(fontSize: 20.0, color: Colors.black, decoration: TextDecoration.none));
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(text, style: TextStyle(fontSize: 16, decoration: TextDecoration.none)),
+        JumpingText('・・・', style: const TextStyle(fontSize: 20.0, color: Colors.black, decoration: TextDecoration.none))
+      ],
+    );
+  }
+}

@@ -1,0 +1,38 @@
+
+[{
+    "message": "成功メッセージ",
+    "session_id": "018fa622",
+    "answers": {
+      "question_id": "018fa647",
+      "question_type": "select",
+      "answer": "018fa64c-c210"
+    },
+    "next_question_category": "normal",
+    "sex": "男",
+    "birthday": "1950-12-01"
+},
+{
+  "message": "成功メッセージ",
+  "session_id": "018fa622",
+  "answers": {
+    "question_id": "018fa649",
+    "question_type": "number",
+    "answer": "79"
+  },
+  "next_question_category": "normal",
+  "sex": "男",
+  "birthday": "1950-12-01"
+},
+{
+  "message": "成功メッセージ",
+  "session_id": "018fa622",
+  "answers": {
+    "question_id": "018fa648",
+    "question_type": "select",
+    "answer": "018fa64c-c210"
+  },
+  "next_question_category": "finish",
+  "sex": "男",
+  "birthday": "1950-12-01"
+}
+]

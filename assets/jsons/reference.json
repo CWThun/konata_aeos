@@ -1,0 +1,29 @@
+{
+    "message": "成功メッセージ",
+    "user_list": [
+      {
+        "kanata_id": "15",
+        "parent_id": "10",
+        "aeos_parameter": "AA@1001",
+        "nickname": "あなた",
+        "sex": "女",
+        "birthmonth": "1990-01-10"
+      },
+      {
+        "kanata_id": "16",
+        "parent_id": "10",
+        "aeos_parameter": "AA@1001",
+        "nickname": "花子ちゃん",
+        "sex": "女",
+        "birthmonth": "2020-02-20"
+      },
+      {
+        "kanata_id": "20",
+        "parent_id": "10",
+        "aeos_parameter": "",
+        "nickname": "お父さん",
+        "sex": "男",
+        "birthmonth": "1990-10-01"
+      }
+    ]
+}

@@ -1,0 +1,77 @@
+[
+{
+    "message": "成功メッセージ",
+    "session_id": "018fa622",
+    "questions": {
+      "id": "018fa647",
+      "type": "select",
+      "content": {
+        "question_title": "発熱があるですね。何度ですか",
+        "items": [
+          {
+            "item_id": "018fa64c-c210",
+            "item_title": "39℃以上ですか？"
+          },
+          {
+            "item_id": "018fa64c-ff0a",
+            "item_title": "38℃以上ですか？"
+          },
+          {
+            "item_id": "018fa64c-20ba",
+            "item_title": "37℃以上ですか？"
+          },
+          {
+            "item_id": "018fa64c-20ba",
+            "item_title": "わからない"
+          }
+        ]
+      }
+    },
+    "sex": "男",
+    "birthday": "1950-12-01"
+},
+{
+  "message": "成功メッセージ",
+  "session_id": "018fa622",
+  "questions": {
+    "id": "018fa649",
+    "type": "number",
+    "content": {
+      "question_title": "脈拍はいくらですか？"      
+    }
+  },
+  "sex": "男",
+  "birthday": "1950-12-01"
+},
+{
+  "message": "成功メッセージ",
+  "session_id": "018fa622",
+  "questions": {
+    "id": "018fa648",
+    "type": "voice",
+    "content": {
+      "question_title": "発熱あるのですね。いつからですか？",
+      "items": [
+        {
+          "item_id": "018fa64c-c210",
+          "item_title": "今日から"
+        },
+        {
+          "item_id": "018fa64c-ff0a",
+          "item_title": "昨日から"
+        },
+        {
+          "item_id": "018fa64c-20ba",
+          "item_title": "一昨日から"
+        },
+        {
+          "item_id": "018fa64c-20ba",
+          "item_title": "わからない"
+        }
+      ]
+    }
+  },
+  "sex": "男",
+  "birthday": "1950-12-01"
+}
+]
