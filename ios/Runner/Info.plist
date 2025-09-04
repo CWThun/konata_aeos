@@ -54,6 +54,6 @@
 		<key>NSSpeechRecognitionUsageDescription</key>
 		<string>ユーザーが音声でバックエンド機能と会話するために、音声認識を使用します。</string>
 		<key>NSMicrophoneUsageDescription</key>
-		<string>音声録音機能を使用するためにマイクへのアクセスが必要です。</string>		
+		<string>音声を文字に変換してチャットで送信するためにマイクへのアクセスが必要です。</string>		
 	</dict>
 </plist>
